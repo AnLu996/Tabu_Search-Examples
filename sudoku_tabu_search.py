@@ -1,154 +1,251 @@
-import pygame
-import sys
 import numpy as np
+import pygame
 import random
+import time
 
 class SudokuTabu:
-    def __init__(self, tablero, max_iteraciones=1000):
-        self.tablero = np.array(tablero)
-        self.max_iteraciones = max_iteraciones
-        self.tabu_list = []
-        self.mejor_conflictos = float('inf')
-        self.mejor_solucion = None
+    def __init__(self, tablero_inicial, velocidad_ms=500):
+        self.tablero = np.array(tablero_inicial)
+        self.tablero_original = self.tablero.copy()
         self.celdas_vacias_originales = self.obtener_celdas_vacias()
+        self.tabu_lista = []
+        self.tabu_tamano = 100
+        self.velocidad_ms = velocidad_ms
+        self.mejor_solucion = None
+        self.mejor_conflictos = float('inf')
+        self.soluciones_encontradas = []
+        self.iteracion_actual = 0
+        self.max_iteraciones = 100
 
     def obtener_celdas_vacias(self):
-        vacias = []
-        for i in range(9):
-            for j in range(9):
-                if self.tablero[i,j] == 0:
-                    vacias.append((i,j))
-        return vacias
+        return [(i, j) for i in range(9) for j in range(9) if self.tablero[i][j] == 0]
 
-    def inicializar_tablero(self):
-        for (i,j) in self.celdas_vacias_originales:
-            self.tablero[i,j] = random.randint(1,9)
+    def es_valido(self, i, j, num):
+        if num in self.tablero[i]: return False
+        if num in self.tablero[:, j]: return False
+        f, c = 3 * (i // 3), 3 * (j // 3)
+        if num in self.tablero[f:f+3, c:c+3]: return False
+        return True
 
-    def contar_conflictos(self, tablero):
+    def rellenar_logicamente(self, screen, font):
+        self.mostrar_mensaje(screen, font, "Iniciando relleno lógico...", (10, 10))
+        progreso = True
+        while progreso:
+            progreso = False
+            for (i, j) in self.celdas_vacias_originales:
+                if self.tablero[i, j] == 0:
+                    posibles = [n for n in range(1, 10) if self.es_valido(i, j, n)]
+                    if len(posibles) == 1:
+                        self.tablero[i, j] = posibles[0]
+                        progreso = True
+                        self.dibujar_tablero_pygame(screen, font, celda_actual=(i, j))
+                        self.mostrar_mensaje(screen, font, f"Rellenando ({i},{j}) con {posibles[0]}", (10, 10))
+                        pygame.display.flip()
+                        pygame.time.wait(self.velocidad_ms)
+        
+        # Verificar si quedan celdas vacías
+        vacias = self.obtener_celdas_vacias()
+        if vacias:
+            self.mostrar_mensaje(screen, font, "No se pueden rellenar más celdas lógicamente", (10, 40))
+            self.mostrar_mensaje(screen, font, "Se rellenarán los espacios con números aleatorios", (10, 70))
+            pygame.display.flip()
+            pygame.time.wait(self.velocidad_ms * 2)
+
+    def inicializar_tablero(self, screen, font):
+        for (i, j) in self.celdas_vacias_originales:
+            if self.tablero[i, j] == 0:
+                self.tablero[i, j] = random.randint(1, 9)
+        self.dibujar_tablero_pygame(screen, font)
+        pygame.display.flip()
+        pygame.time.wait(self.velocidad_ms)
+
+    def contar_conflictos(self, tablero=None):
+        if tablero is None:
+            tablero = self.tablero
         conflictos = 0
-        # Filas
-        for fila in tablero:
-            conflictos += 9 - len(set(fila))
-        # Columnas
-        for col in tablero.T:
-            conflictos += 9 - len(set(col))
-        # Cuadrantes 3x3
-        for i in range(3):
-            for j in range(3):
-                block = tablero[i*3:(i+1)*3, j*3:(j+1)*3].flatten()
-                conflictos += 9 - len(set(block))
+        for i in range(9):
+            conflictos += 9 - len(set(tablero[i, :]))
+            conflictos += 9 - len(set(tablero[:, i]))
+        for f in range(0, 9, 3):
+            for c in range(0, 9, 3):
+                subcuadro = tablero[f:f+3, c:c+3].flatten()
+                conflictos += 9 - len(set(subcuadro))
         return conflictos
 
-    def generar_vecinos(self):
-        vecinos = []
-        # Generar vecinos intercambiando valores en dos celdas vacías al azar
-        if len(self.celdas_vacias_originales) < 2:
-            return vecinos
-        for _ in range(10):  # 10 vecinos por iteración
-            c1, c2 = random.sample(self.celdas_vacias_originales, 2)
-            vecino = np.copy(self.tablero)
-            vecino[c1], vecino[c2] = vecino[c2], vecino[c1]
-            vecinos.append((c1, c2, vecino))
-        return vecinos
-
-    def dibujar_tablero_pygame(self, screen, font, celda1=None, celda2=None):
-        screen.fill((255,255,255))
-        size_celda = 40
-        for i in range(9):
-            for j in range(9):
-                rect = pygame.Rect(j*size_celda, i*size_celda+40, size_celda, size_celda)
-                color = (200,200,200)
-                if (i,j) == celda1 or (i,j) == celda2:
-                    color = (255,200,200)
-                pygame.draw.rect(screen, color, rect)
-                pygame.draw.rect(screen, (0,0,0), rect, 1)
-                valor = self.tablero[i,j]
-                if valor != 0:
-                    text = font.render(str(valor), True, (0,0,0))
-                    text_rect = text.get_rect(center=rect.center)
-                    screen.blit(text, text_rect)
-        # Líneas gruesas para cuadrantes
-        for i in range(10):
-            grosor = 3 if i%3 == 0 else 1
-            pygame.draw.line(screen, (0,0,0), (0, i*size_celda+40), (9*size_celda, i*size_celda+40), grosor)
-            pygame.draw.line(screen, (0,0,0), (i*size_celda, 40), (i*size_celda, 9*size_celda+40), grosor)
-
     def resolver_tabu_paso_a_paso(self, screen, font):
-        self.inicializar_tablero()
+        # Fase 1: Relleno lógico
+        self.rellenar_logicamente(screen, font)
+        self.celdas_vacias_originales = self.obtener_celdas_vacias()
+        
+        # Fase 2: Inicialización aleatoria
+        self.inicializar_tablero(screen, font)
+        
+        # Fase 3: Búsqueda Tabú
+        self.mostrar_mensaje(screen, font, "Iniciando búsqueda Tabú...", (10, 10))
+        pygame.display.flip()
+        pygame.time.wait(self.velocidad_ms)
+        
+        self.mejor_solucion = self.tablero.copy()
+        self.mejor_conflictos = self.contar_conflictos()
+        self.soluciones_encontradas.append((self.mejor_solucion.copy(), self.mejor_conflictos))
+        
+        while self.mejor_conflictos > 0 and self.iteracion_actual < self.max_iteraciones:
+            vecinos = []
+            for _ in range(50):
+                vecino = self.tablero.copy()
+                if len(self.celdas_vacias_originales) < 2:
+                    continue
+                (i1, j1), (i2, j2) = random.sample(self.celdas_vacias_originales, 2)
+                vecino[i1, j1], vecino[i2, j2] = vecino[i2, j2], vecino[i1, j1]
+                if (i1, j1, i2, j2) not in self.tabu_lista:
+                    vecinos.append((vecino, (i1, j1, i2, j2)))
 
-        iteracion = 0
-        while iteracion < self.max_iteraciones:
-            vecinos = self.generar_vecinos()
             if not vecinos:
                 break
 
-            mejor_vecino = None
-            mejor_conflictos_vecino = float('inf')
-            mejor_celda1 = None
-            mejor_celda2 = None
+            # Evaluar vecinos
+            vecinos_conflictos = [(v, m, self.contar_conflictos(v)) for v, m in vecinos]
+            vecinos_conflictos.sort(key=lambda x: x[2])
+            
+            mejor_vecino, movimiento, conflictos_vecino = vecinos_conflictos[0]
+            
+            # Actualizar mejor solución
+            if conflictos_vecino < self.mejor_conflictos:
+                self.mejor_solucion = mejor_vecino.copy()
+                self.mejor_conflictos = conflictos_vecino
+                self.soluciones_encontradas.append((self.mejor_solucion.copy(), self.mejor_conflictos))
+                
+                # Mostrar alerta de nueva solución
+                self.dibujar_tablero_pygame(screen, font)
+                
+                # Fondo para el mensaje de alerta
+                alerta_rect = pygame.Rect(100, 150, 400, 100)
+                pygame.draw.rect(screen, (200, 255, 200), alerta_rect)  # Fondo verde claro
+                pygame.draw.rect(screen, (0, 180, 0), alerta_rect, 3)  # Borde verde oscuro
+                
+                # Texto de la alerta
+                texto_alertas = [
+                    f"¡NUEVA MEJOR SOLUCIÓN ENCONTRADA!",
+                    f"Solución #{len(self.soluciones_encontradas)}",
+                    f"Conflictos reducidos a: {self.mejor_conflictos}",
+                    f"Iteración actual: {self.iteracion_actual}"
+                ]
+                
+                for i, texto in enumerate(texto_alertas):
+                    color = (0, 100, 0) if i == 0 else (0, 0, 0)  # Primer línea en verde oscuro
+                    texto_surface = font.render(texto, True, color)
+                    screen.blit(texto_surface, (120, 160 + i * 25))
+                
+                pygame.display.flip()
+                pygame.time.wait(self.velocidad_ms * 2)
 
-            for (pos1, pos2, vecino) in vecinos:
-                conflictos = self.contar_conflictos(vecino)
-                if conflictos < mejor_conflictos_vecino:
-                    mejor_vecino = vecino
-                    mejor_conflictos_vecino = conflictos
-                    mejor_celda1, mejor_celda2 = pos1, pos2
+            # Actualizar tablero actual y lista tabú
+            self.tablero = mejor_vecino.copy()
+            self.tabu_lista.append(movimiento)
+            if len(self.tabu_lista) > self.tabu_tamano:
+                self.tabu_lista.pop(0)
 
-            if mejor_vecino is None:
-                break
-
-            self.tablero = mejor_vecino
-            if mejor_conflictos_vecino < self.mejor_conflictos:
-                self.mejor_conflictos = mejor_conflictos_vecino
-                self.mejor_solucion = np.copy(mejor_vecino)
-
-            self.dibujar_tablero_pygame(screen, font, celda1=mejor_celda1, celda2=mejor_celda2)
-            texto_iter = font.render(f"Iter: {iteracion} Conflictos: {mejor_conflictos_vecino}", True, (0, 128, 0))
-            screen.blit(texto_iter, (10, 10))
-
+            # Mostrar información de la iteración
+            self.dibujar_tablero_pygame(screen, font)
+            self.mostrar_info_iteracion(screen, font)
             pygame.display.flip()
-            pygame.time.wait(200)
+            pygame.time.wait(self.velocidad_ms // 2)
 
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    sys.exit()
+            self.iteracion_actual += 1
 
-            if self.mejor_conflictos == 0:
-                break
+        # Mostrar resultado final
+        self.tablero = self.mejor_solucion.copy()
+        self.dibujar_tablero_pygame(screen, font)
+        if self.mejor_conflictos == 0:
+            self.mostrar_mensaje(screen, font, "¡Solución encontrada!", (10, 10), color=(0, 200, 0))
+        else:
+            self.mostrar_mensaje(screen, font, "Solución no óptima encontrada", (10, 10), color=(200, 0, 0))
+        
+        self.mostrar_mensaje(screen, font, f"Total iteraciones: {self.iteracion_actual}", (10, 40))
+        self.mostrar_mensaje(screen, font, f"Conflictos finales: {self.mejor_conflictos}", (10, 70))
+        self.mostrar_mensaje(screen, font, f"Mejores soluciones encontradas: {len(self.soluciones_encontradas)}", (10, 100))
+        pygame.display.flip()
+        pygame.time.wait(self.velocidad_ms * 10)
 
-            iteracion += 1
+        return self.mejor_conflictos == 0
 
-        return self.mejor_solucion
+    def mostrar_info_iteracion(self, screen, font):
+        self.mostrar_mensaje(screen, font, f"Búsqueda Tabú en progreso...", (10, 10))
+        self.mostrar_mensaje(screen, font, f"Solución actual: #{len(self.soluciones_encontradas)}", (10, 40))
+        self.mostrar_mensaje(screen, font, f"Mejor solución: {self.mejor_conflictos} conflictos", (10, 70))
+        self.mostrar_mensaje(screen, font, f"Iteración: {self.iteracion_actual}/{self.max_iteraciones}", (10, 100))
+        self.mostrar_mensaje(screen, font, f"Conflictos actuales: {self.contar_conflictos()}", (10, 130))
+
+    def mostrar_mensaje(self, screen, font, texto, posicion, color=(0, 0, 0)):
+        texto_surface = font.render(texto, True, color)
+        screen.blit(texto_surface, posicion)
+
+    def dibujar_tablero_pygame(self, screen, font, celda_actual=None):
+        # Fondo blanco
+        screen.fill((255, 255, 255))
+        
+        # Dibujar cuadrícula
+        for i in range(10):
+            ancho = 3 if i % 3 == 0 else 1
+            pygame.draw.line(screen, (0, 0, 0), (0, i * 40), (360, i * 40), ancho)
+            pygame.draw.line(screen, (0, 0, 0), (i * 40, 0), (i * 40, 360), ancho)
+
+        # Dibujar números
+        for i in range(9):
+            for j in range(9):
+                num = self.tablero[i, j]
+                if num != 0:
+                    # Números originales en azul, rellenados en verde
+                    color = (0, 0, 255) if self.tablero_original[i, j] != 0 else (0, 128, 0)
+                    texto = font.render(str(num), True, color)
+                    screen.blit(texto, (j * 40 + 15, i * 40 + 10))
+
+        # Resaltar celda actual si se especifica
+        if celda_actual:
+            i, j = celda_actual
+            pygame.draw.rect(screen, (255, 255, 0), (j * 40, i * 40, 40, 40), 3)
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((360, 400))
-    pygame.display.set_caption("Sudoku Tabu Paso a Paso")
-    font = pygame.font.SysFont(None, 30)
+    screen = pygame.display.set_mode((600, 400))
+    pygame.display.set_caption("Resolución de Sudoku con Búsqueda Tabú")
+    font = pygame.font.SysFont("Arial", 16)
+    font_bold = pygame.font.SysFont("Arial", 16, bold=True)
 
-    # Ejemplo tablero: 0 son celdas vacías
-    tablero_inicial = [
-        [5,3,0,0,7,0,0,0,0],
-        [6,0,0,1,9,5,0,0,0],
-        [0,9,8,0,0,0,0,6,0],
-        [8,0,0,0,6,0,0,0,3],
-        [4,0,0,8,0,3,0,0,1],
-        [7,0,0,0,2,0,0,0,6],
-        [0,6,0,0,0,0,2,8,0],
-        [0,0,0,4,1,9,0,0,5],
-        [0,0,0,0,8,0,0,7,9]
+    sudoku = [
+        [5, 0, 7, 6, 0, 0, 0, 3, 4],
+        [0, 0, 9, 0, 0, 4, 0, 0, 0],
+        [3, 0, 6, 2, 0, 5, 0, 9, 0],
+        [6, 0, 2, 0, 0, 0, 0, 1, 0],
+        [0, 3, 8, 0, 0, 6, 0, 4, 7],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 9, 0, 0, 0, 0, 0, 7, 8],
+        [7, 0, 3, 4, 0, 0, 5, 6, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0],
     ]
 
-    sudoku = SudokuTabu(tablero_inicial, max_iteraciones=1000)
-    solucion = sudoku.resolver_tabu_paso_a_paso(screen, font)
+    velocidad = 500  # Velocidad de visualización en ms
+    juego = SudokuTabu(sudoku, velocidad_ms=velocidad)
 
-    # Mostrar resultado final por 5 segundos
-    sudoku.dibujar_tablero_pygame(screen, font)
-    texto_final = font.render(f"Conflictos finales: {sudoku.mejor_conflictos}", True, (0, 0, 255))
-    screen.blit(texto_final, (10, 10))
+    # Dibujar tablero inicial
+    screen.fill((255, 255, 255))
+    juego.dibujar_tablero_pygame(screen, font)
+    juego.mostrar_mensaje(screen, font_bold, "Tablero inicial de Sudoku", (400, 20))
     pygame.display.flip()
-    pygame.time.wait(5000)
+    pygame.time.wait(velocidad * 2)
+
+    corriendo = True
+    while corriendo:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                corriendo = False
+        
+        # Resolver el sudoku
+        juego.resolver_tabu_paso_a_paso(screen, font)
+        
+        # Esperar antes de salir
+        pygame.time.wait(velocidad * 5)
+        corriendo = False
 
     pygame.quit()
 
