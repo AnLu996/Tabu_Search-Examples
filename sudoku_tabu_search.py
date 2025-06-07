@@ -124,8 +124,8 @@ class SudokuTabu:
                 
                 # Fondo para el mensaje de alerta
                 alerta_rect = pygame.Rect(385, 240, 320, 110)
-                pygame.draw.rect(screen, (200, 255, 200), alerta_rect)  # Fondo verde claro
-                pygame.draw.rect(screen, (0, 180, 0), alerta_rect, 3)  # Borde verde oscuro
+                pygame.draw.rect(screen, (200, 255, 200), alerta_rect)
+                pygame.draw.rect(screen, (0, 180, 0), alerta_rect, 3) 
                 
                 # Texto de la alerta
                 texto_alertas = [
@@ -136,7 +136,7 @@ class SudokuTabu:
                 ]
                 
                 for i, texto in enumerate(texto_alertas):
-                    color = (0, 100, 0) if i == 0 else (0, 0, 0)  # Primer línea en verde oscuro
+                    color = (0, 100, 0) if i == 0 else (0, 0, 0)
                     texto_surface = font.render(texto, True, color)
                     screen.blit(texto_surface, (410, 250 + i * 25))
                 
@@ -175,8 +175,8 @@ class SudokuTabu:
 
     def mostrar_info_iteracion(self, screen, font):
         self.mostrar_mensaje(screen, font, f"Búsqueda Tabú en progreso...", (385, 10))
-        self.mostrar_mensaje(screen, font, f"Solución actual: #{len(self.soluciones_encontradas)}", (385, 40))
-        self.mostrar_mensaje(screen, font, f"Mejor solución: {self.mejor_conflictos} conflictos", (385, 70))
+        self.mostrar_mensaje(screen, font, f"Mejores soluciones encontradas: #{len(self.soluciones_encontradas)}", (385, 40))
+        self.mostrar_mensaje(screen, font, f"Mejor solución encontrada: {self.mejor_conflictos} conflictos", (385, 70))
         self.mostrar_mensaje(screen, font, f"Iteración: {self.iteracion_actual}/{self.max_iteraciones}", (385, 100))
         self.mostrar_mensaje(screen, font, f"Conflictos actuales: {self.contar_conflictos()}", (385, 130))
 
@@ -209,9 +209,11 @@ class SudokuTabu:
                 pygame.draw.rect(screen, (255, 100, 0), (j * 40 + 10, i * 40 + 10, 40, 40), 3)  # Naranja
 
         # Resaltar celda actual si se especifica (original)
-        if celda_actual:
-            i, j = celda_actual
-            pygame.draw.rect(screen, (255, 0, 0), (j * 40 + 10, i * 40 + 10, 40, 40), 3)  # Rojo
+        if celdas_cambiadas:
+            # Eliminar duplicados manteniendo el orden
+            celdas_unicas = list(dict.fromkeys(celdas_cambiadas))
+            for i, j in celdas_unicas:
+                pygame.draw.rect(screen, (255, 165, 0), (j * 40 + 10, i * 40 + 10, 40, 40), 3)
 
 def main():
     pygame.init()
@@ -242,18 +244,22 @@ def main():
     pygame.display.flip()
     pygame.time.wait(velocidad * 2)
 
+    # Resolver el sudoku
+    solucion_encontrada = juego.resolver_tabu_paso_a_paso(screen, font)
+
     corriendo = True
     while corriendo:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 corriendo = False
         
-        # Resolver el sudoku
-        juego.resolver_tabu_paso_a_paso(screen, font)
+        if solucion_encontrada:
+            juego.mostrar_mensaje(screen, font, "¡Solución encontrada!", (385, 130), color=(0, 200, 0))
+        else:
+            juego.mostrar_mensaje(screen, font, "Solución no óptima encontrada", (385, 130), color=(200, 0, 0))
         
-        # Esperar antes de salir
-        pygame.time.wait(velocidad * 5)
-        corriendo = False
+        pygame.display.flip()
+        pygame.time.wait(100)
 
     pygame.quit()
 
